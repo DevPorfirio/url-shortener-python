@@ -1,0 +1,87 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: url-shortener-api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  mongo:
+    image: mongo:7.0
+    container_name: url-shortener-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: url_shortener
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: url-shortener-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly yes
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: url-shortener-celery-worker
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - mongo
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    command: celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: url-shortener-celery-beat
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    command: celery -A app.tasks.celery_app.celery_app beat --loglevel=INFO
+
+  flower:
+    image: mher/flower:2.0
+    container_name: url-shortener-flower
+    env_file:
+      - .env
+    command:
+      [
+        "celery",
+        "--broker=${CELERY_BROKER_URL}",
+        "flower",
+        "--address=0.0.0.0",
+        "--port=5555"
+      ]
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+volumes:
+  mongo-data:
